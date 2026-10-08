@@ -6,6 +6,24 @@ This installer sets up everything: the RX3 firmware in a chroot, a display prese
 
 ---
 
+Table of contents
+
+· What it does
+· Hardware requirements
+· Features
+· Installation
+· Verifying after install
+· Updating
+· File layout after install
+· Configuration
+· Troubleshooting
+· Uninstall
+· Credits
+· License
+· Support
+
+---
+
 What it does
 
 Component Purpose
@@ -21,11 +39,11 @@ rx3.service systemd unit that starts everything at boot
 Hardware requirements
 
 Item Notes
-Raspberry Pi 4 Any RAM size (1/2/4/8 GB). Pi 3, Pi 5 not supported.
+Raspberry Pi 4 Any RAM size (1/2/4/8 GB). Pi 3 and Pi 5 are not supported.
 Official 7" DSI touch panel 800×480. Other DSI panels may need config changes.
 DDJ-FLX4 Tested with firmware as shipped. Other controllers need MIDI map changes.
-USB-C power supply 5.1 V / 3 A minimum (official Pi 4 PSU recommended)
-MicroSD card 16 GB or larger
+USB-C power supply 5.1 V / 3 A minimum (official Pi 4 PSU recommended).
+MicroSD card 16 GB or larger.
 
 ---
 
@@ -134,7 +152,7 @@ for deck in (1, 2):
     o = 16 + 64*16 + 4*(deck-1)
     print(f'deck {deck}:', struct.unpack_from('<i', d, o)[0])
 "
-# Play music → deck 1 shows a value like -14, -8, etc.
+# Play music -> deck 1 shows a value like -14, -8, etc.
 ```
 
 Press the FLX4 buttons:
@@ -153,7 +171,7 @@ The system supports two update methods.
 
 Method 1 — Online (GitHub Actions + Gmail)
 
-When you push changes to your fork of Rx3-flx4, GitHub Actions builds a release and emails you a link. See rx3-usb-update/ for the automated workflow.
+When you push changes to your fork of Rx3-flx4, GitHub Actions builds a release and emails you a link.
 
 Method 2 — Offline (USB stick)
 
@@ -169,17 +187,15 @@ The updater on the Pi:
 · Rolls back automatically if the service fails to start
 · Records the applied version so the same USB can't be applied twice
 
-See rx3-usb-update/README.md for the full workflow.
-
 ---
 
 File layout after install
 
-```
+```text
 /home/drclab/
 ├── Rx3-flx4/                       # Source tree (from fork or zip)
 │   └── rx3-handoff/
-│       ├── controller-bridge.py    # FLX4 ↔ RX3 bridge
+│       ├── controller-bridge.py    # FLX4 <-> RX3 bridge
 │       ├── control-shim.c          # Firmware hooks + VU publisher
 │       ├── fbshim.c                # Audio/framebuffer hooks
 │       ├── rx3-start.sh            # Service entry point
