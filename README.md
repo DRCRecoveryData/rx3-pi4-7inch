@@ -1,4 +1,4 @@
-rx3-pi4-7inch
+# rx3-pi4-7inch
 
 Run the Pioneer XDJ-RX3 rekordbox player on a Raspberry Pi 4 with a 7" DSI touch display and a DDJ-FLX4 controller.
 
@@ -6,92 +6,95 @@ This installer sets up everything: the RX3 firmware in a chroot, a display prese
 
 ---
 
-Table of contents
+## Table of contents
 
-· What it does
-· Hardware requirements
-· Features
-· Installation
-· Verifying after install
-· Updating
-· File layout after install
-· Configuration
-· Troubleshooting
-· Uninstall
-· Credits
-· License
-· Support
-
----
-
-What it does
-
-Component Purpose
-rbp-pi Pioneer's XDJ-RX3 firmware running in an ARM32 chroot
-rx3-fb-present Copies firmware frames to /dev/fb0 (7" DSI, 800×480)
-controller-bridge.py Translates DDJ-FLX4 MIDI into RX3 firmware commands and drives the controller's LEDs
-control-shim.c LD_PRELOAD shim that hooks the firmware and publishes mixer levels
-fbshim.c LD_PRELOAD shim that tracks audio writes and detects stalls
-rx3.service systemd unit that starts everything at boot
+- [What it does](#what-it-does)
+- [Hardware requirements](#hardware-requirements)
+- [Features](#features)
+- [Installation](#installation)
+- [Verifying after install](#verifying-after-install)
+- [Updating](#updating)
+- [File layout after install](#file-layout-after-install)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+- [Uninstall](#uninstall)
+- [Credits](#credits)
+- [License](#license)
+- [Support](#support)
 
 ---
 
-Hardware requirements
+## What it does
 
-Item Notes
-Raspberry Pi 4 Any RAM size (1/2/4/8 GB). Pi 3 and Pi 5 are not supported.
-Official 7" DSI touch panel 800×480. Other DSI panels may need config changes.
-DDJ-FLX4 Tested with firmware as shipped. Other controllers need MIDI map changes.
-USB-C power supply 5.1 V / 3 A minimum (official Pi 4 PSU recommended).
-MicroSD card 16 GB or larger.
+| Component | Purpose |
+| :--- | :--- |
+| `rbp-pi` | Pioneer's XDJ-RX3 firmware running in an ARM32 chroot |
+| `rx3-fb-present` | Copies firmware frames to `/dev/fb0` (7" DSI, 800×480) |
+| `controller-bridge.py` | Translates DDJ-FLX4 MIDI into RX3 firmware commands and drives the controller's LEDs |
+| `control-shim.c` | LD_PRELOAD shim that hooks the firmware and publishes mixer levels |
+| `fbshim.c` | LD_PRELOAD shim that tracks audio writes and detects stalls |
+| `rx3.service` | systemd unit that starts everything at boot |
 
 ---
 
-Features
+## Hardware requirements
 
-Verified working
+| Item | Notes |
+| :--- | :--- |
+| **Raspberry Pi 4** | Any RAM size (1/2/4/8 GB). Pi 3 and Pi 5 are not supported. |
+| **Official 7" DSI touch panel** | 800×480. Other DSI panels may need config changes. |
+| **DDJ-FLX4** | Tested with firmware as shipped. Other controllers need MIDI map changes. |
+| **USB-C power supply** | 5.1 V / 3 A minimum (official Pi 4 PSU recommended). |
+| **MicroSD card** | 16 GB or larger. |
 
-· RX3 UI on 7" DSI — full firmware interface, touch enabled
-· Audio through the FLX4 — 2-channel output to the controller's sound card
-· USB media playback — mount removable drives via copy-on-write overlay
-· Autostart on boot — systemd handles everything
+---
 
-Controller mappings (DDJ-FLX4)
+## Features
+
+### Verified working
+
+- RX3 UI on 7" DSI — full firmware interface, touch enabled
+- Audio through the FLX4 — 2-channel output to the controller's sound card
+- USB media playback — mount removable drives via copy-on-write overlay
+- Autostart on boot — systemd handles everything
+
+### Controller mappings (DDJ-FLX4)
 
 All mappings verified on hardware:
 
-FLX4 control Action
-Smart Fader (ch6 note 0x01) Opens the firmware's Source screen
-Smart CFX (ch6 note 0x00) Opens the firmware's Browse screen
-Master Cue (ch6 note 0x63) Toggles the firmware's master cue
-Headphone Cue deck 1/2 (ch0/1 note 0x54) Toggles cue + LED in sync
-FX ON/OFF (ch4 note 0x47) Toggles the beat FX, LED mirrors state
-Pad mode buttons HOTCUE / PADFX1 / BEATJUMP / SAMPLER — LED shows active mode
-Hot cue pads A–H LED turns on when cue set, off on SHIFT+press
-Shift + pad Clears the pad LED and the firmware cue
+| FLX4 control | Action |
+| :--- | :--- |
+| **Smart Fader** (ch6 note `0x01`) | Opens the firmware's **Source** screen |
+| **Smart CFX** (ch6 note `0x00`) | Opens the firmware's **Browse** screen |
+| **Master Cue** (ch6 note `0x63`) | Toggles the firmware's master cue |
+| **Headphone Cue deck 1/2** (ch0/1 note `0x54`) | Toggles cue + LED in sync |
+| **FX ON/OFF** (ch4 note `0x47`) | Toggles the beat FX, LED mirrors state |
+| **Pad mode buttons** | HOTCUE / PADFX1 / BEATJUMP / SAMPLER — LED shows active mode |
+| **Hot cue pads A–H** | LED turns on when cue set, off on SHIFT+press |
+| **Shift + pad** | Clears the pad LED and the firmware cue |
 
-VU meters
+### VU meters
 
-The FLX4's deck VU meters show the firmware's channel levels, driven through MIDI CC 0x02:
+The FLX4's deck VU meters show the firmware's channel levels, driven through MIDI CC `0x02`:
 
-· Levels come from DjEngineIF::getInputChLevelMono inside the firmware
-· Published to /tmp/rx3-leds by control-shim.c (300 ms poll)
-· Read by controller-bridge.py, scaled by the physical channel fader position
-· Sent as 0xB0 0x02 <value> (deck 1) / 0xB1 0x02 <value> (deck 2)
-· Polled at 3.3 Hz — slow enough that the FLX4's single MIDI endpoint survives continuous output while still reading input
+- Levels come from `DjEngineIF::getInputChLevelMono` inside the firmware
+- Published to `/tmp/rx3-leds` by `control-shim.c` (300 ms poll)
+- Read by `controller-bridge.py`, scaled by the physical channel fader position
+- Sent as `0xB0 0x02 <value>` (deck 1) / `0xB1 0x02 <value>` (deck 2)
+- Polled at 3.3 Hz — slow enough that the FLX4's single MIDI endpoint survives continuous output while still reading input
 
-Note: Earlier versions tried 33 Hz and 10 Hz polling. Both wedged the FLX4 within minutes. 3.3 Hz is the fastest rate that has proven stable on tested hardware.
+> **Note:** Earlier versions tried 33 Hz and 10 Hz polling. Both wedged the FLX4 within minutes. 3.3 Hz is the fastest rate that has proven stable on tested hardware.
 
-Known limitations
+### Known limitations
 
-· Pad LEDs blank while SHIFT is held — this is FLX4 firmware behavior, not fixable over MIDI.
-· Pad F may blink by default — an FLX4 quirk in HOTCUE mode. The bridge does not interfere.
+- **Pad LEDs blank while SHIFT is held** — this is FLX4 firmware behavior, not fixable over MIDI.
+- **Pad F may blink by default** — an FLX4 quirk in HOTCUE mode. The bridge does not interfere.
 
 ---
 
-Installation
+## Installation
 
-Quick start
+### Quick start
 
 ```bash
 git clone https://github.com/YOUR-USERNAME/rx3-pi4-7inch.git
@@ -102,17 +105,17 @@ AUTO_REBOOT=0 bash rx3-pi4-install.sh 2>&1 | tee ~/rx3-install.log
 
 The installer will:
 
-1. Patch /boot/firmware/cmdline.txt with USB quirks
+1. Patch `/boot/firmware/cmdline.txt` with USB quirks
 2. Install build dependencies
-3. Clone or unzip the Rx3-flx4 source tree
+3. Clone or unzip the `Rx3-flx4` source tree
 4. Apply all bridge patches (Smart Fader, pad LEDs, VU meters, etc.)
-5. Patch control-shim.c with the VU level publisher
-6. Write rx3.conf
+5. Patch `control-shim.c` with the VU level publisher
+6. Write `rx3.conf`
 7. Handle the FT5x06 touch driver
 8. Recover the firmware from Pioneer (~110 MB download)
 9. Build the chroot
-10. Compile fbshim.so
-11. Enable and start rx3.service
+10. Compile `fbshim.so`
+11. Enable and start `rx3.service`
 
 When it finishes, reboot:
 
@@ -120,11 +123,12 @@ When it finishes, reboot:
 sudo reboot
 ```
 
-Install script options
+### Install script options
 
-Variable Default Purpose
-AUTO_REBOOT 1 Reboot at the end. Set to 0 to review the log first.
-VU 0 Enable VU meters (may wedge the FLX4 on some firmware revisions)
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `AUTO_REBOOT` | `1` | Reboot at the end. Set to `0` to review the log first. |
+| `VU` | `0` | Enable VU meters (may wedge the FLX4 on some firmware revisions) |
 
 Example without auto-reboot:
 
@@ -134,7 +138,7 @@ AUTO_REBOOT=0 bash rx3-pi4-install.sh
 
 ---
 
-Verifying after install
+## Verifying after install
 
 ```bash
 # Is the service running?
@@ -157,39 +161,39 @@ for deck in (1, 2):
 
 Press the FLX4 buttons:
 
-· Smart Fader → Source screen appears
-· Smart CFX → Browse screen appears
-· Pad mode buttons → LEDs switch
-· Hot cue pads → LEDs toggle
-· Play music → VU meters move
+- Smart Fader → Source screen appears
+- Smart CFX → Browse screen appears
+- Pad mode buttons → LEDs switch
+- Hot cue pads → LEDs toggle
+- Play music → VU meters move
 
 ---
 
-Updating
+## Updating
 
 The system supports two update methods.
 
-Method 1 — Online (GitHub Actions + Gmail)
+### Method 1 — Online (GitHub Actions + Gmail)
 
-When you push changes to your fork of Rx3-flx4, GitHub Actions builds a release and emails you a link.
+When you push changes to your fork of `Rx3-flx4`, GitHub Actions builds a release and emails you a link.
 
-Method 2 — Offline (USB stick)
+### Method 2 — Offline (USB stick)
 
-1. Build an update package on your dev machine with make-rx3-update.sh
-2. Write it to a USB stick labeled RX3UPDATE
+1. Build an update package on your dev machine with `make-rx3-update.sh`
+2. Write it to a USB stick labeled `RX3UPDATE`
 3. Mail the stick to the target Pi's owner
-4. They plug it in → green UPDATE OK on screen → unplug
+4. They plug it in → green `UPDATE OK` on screen → unplug
 
 The updater on the Pi:
 
-· Verifies SHA256 checksum before applying
-· Backs up the current files
-· Rolls back automatically if the service fails to start
-· Records the applied version so the same USB can't be applied twice
+- Verifies SHA256 checksum before applying
+- Backs up the current files
+- Rolls back automatically if the service fails to start
+- Records the applied version so the same USB can't be applied twice
 
 ---
 
-File layout after install
+## File layout after install
 
 ```text
 /home/drclab/
@@ -213,11 +217,11 @@ File layout after install
 
 ---
 
-Configuration
+## Configuration
 
-rx3.conf
+### `rx3.conf`
 
-Located at ~/Rx3-flx4/rx3-handoff/rx3.conf:
+Located at `~/Rx3-flx4/rx3-handoff/rx3.conf`:
 
 ```ini
 RX3_FB=/dev/fb0
@@ -225,20 +229,21 @@ RX3_ROTATE=0
 RX3_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 ```
 
-Variable Values Meaning
-RX3_FB /dev/fb0 etc. Framebuffer device
-RX3_ROTATE 0, 90, 180, 270 Display rotation (clockwise)
-RX3_FONT Path to TTF Font used by the presenter
+| Variable | Values | Meaning |
+| :--- | :--- | :--- |
+| `RX3_FB` | `/dev/fb0` etc. | Framebuffer device |
+| `RX3_ROTATE` | `0`, `90`, `180`, `270` | Display rotation (clockwise) |
+| `RX3_FONT` | Path to TTF | Font used by the presenter |
 
-Controller bridge logging
+### Controller bridge logging
 
-The bridge writes detailed logs to /home/drclab/rx3-controller.log. To disable logging, set RX3_BRIDGE_LOG= to empty in the service environment.
+The bridge writes detailed logs to `/home/drclab/rx3-controller.log`. To disable logging, set `RX3_BRIDGE_LOG=` to empty in the service environment.
 
 ---
 
-Troubleshooting
+## Troubleshooting
 
-Screen is black after boot
+### Screen is black after boot
 
 ```bash
 # Check the DSI connector
@@ -255,9 +260,9 @@ cat /sys/class/backlight/*/brightness
 cat /home/drclab/rx3-present.log
 ```
 
-If the connector says connected but the screen is dark, the DSI overlay may be missing. Check /boot/firmware/config.txt for dtoverlay=vc4-kms-dsi-7inch.
+If the connector says `connected` but the screen is dark, the DSI overlay may be missing. Check `/boot/firmware/config.txt` for `dtoverlay=vc4-kms-dsi-7inch`.
 
-FLX4 doesn't respond to any button
+### FLX4 doesn't respond to any button
 
 ```bash
 # Is the device detected?
@@ -273,7 +278,7 @@ tail -f /home/drclab/rx3-controller.log
 
 If the FLX4 dropped off the USB bus (usually after a MIDI overload), unplug it, wait 15 seconds, plug it back in.
 
-VU meters don't light up
+### VU meters don't light up
 
 ```bash
 # Is the shim publishing?
@@ -287,21 +292,21 @@ arm-linux-gnueabi-gcc -shared -fPIC -O2 -fomit-frame-pointer -fno-builtin -nostd
 sudo systemctl restart rx3.service
 ```
 
-FLX4 wedges after a few minutes of playback
+### FLX4 wedges after a few minutes of playback
 
 This is a known hardware limitation. The FLX4's single MIDI endpoint cannot sustain continuous output while reading input at high rates. The installed configuration (3.3 Hz) is the fastest that has proven stable.
 
 If it still wedges:
 
 1. Unplug and replug the FLX4
-2. If the issue returns, disable VU meters by editing controller-bridge.py:
-   · Find time.sleep(0.30) in the led_loop function
-   · Change to time.sleep(0.50) (2 Hz) or higher
-3. Or remove the entire led_loop thread if you don't need VU
+2. If the issue returns, disable VU meters by editing `controller-bridge.py`:
+   - Find `time.sleep(0.30)` in the `led_loop` function
+   - Change to `time.sleep(0.50)` (2 Hz) or higher
+3. Or remove the entire `led_loop` thread if you don't need VU
 
 ---
 
-Uninstall
+## Uninstall
 
 ```bash
 sudo systemctl stop rx3.service
@@ -318,14 +323,14 @@ rm -f ~/.rx3-usb-version
 
 ---
 
-Credits
+## Credits
 
-· Pioneer DJ — original XDJ-RX3 firmware
-· mutlisensor — the Rx3-flx4 project providing the base bridge and shim architecture
-· DRCRecoveryData — this installer and the FLX4-specific patches
+- **Pioneer DJ** — original XDJ-RX3 firmware
+- **mutlisensor** — the `Rx3-flx4` project providing the base bridge and shim architecture
+- **DRCRecoveryData** — this installer and the FLX4-specific patches
 
 ---
 
-License
+## License
 
 The installer and patches in this repository are provided as-is for personal use. The firmware itself remains the property of AlphaTheta / Pioneer DJ.
