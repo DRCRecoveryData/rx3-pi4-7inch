@@ -105,6 +105,66 @@ else: print("    C) MISS")
 p.write_text(s)
 PYEOF
 
+# --- 4b. patch controller-bridge.py (FLX4 Smart FX mapping) -----------------
+say "Patching controller-bridge.py (Smart Fader -> SOURCE, Smart CFX -> BROWSE)"
+python3 - <<'PYEOF'
+from pathlib import Path
+import sys
+
+p = Path.home() / "Rx3-flx4/rx3-handoff/controller-bridge.py"
+if not p.exists():
+    print("    MISS — controller-bridge.py not found")
+    sys.exit(0)
+
+s = p.read_text()
+
+if "# Smart Fader (ch6" in s and "# Smart CFX (ch6" in s:
+    print("    already present (both handlers)")
+    sys.exit(0)
+
+if "# Smart Fader (ch6" in s or "# Smart CFX (ch6" in s:
+    print("    WARN — partial patch already present, skipping")
+    sys.exit(0)
+
+anchor = (
+    "    elif ch == 6:\n"
+    "        if ctl_id == 'xdjr1':\n"
+    "            if n in (0x54, 0x55):"
+)
+
+replacement = (
+    "    elif ch == 6:\n"
+    "        # Smart Fader (ch6, note 0x01) -> SOURCE\n"
+    "        if n == 0x01:\n"
+    "            if down:\n"
+    "                press(K['source'], 0, True)\n"
+    "                time.sleep(0.02)\n"
+    "                press(K['source'], 0, False)\n"
+    "            return\n"
+    "\n"
+    "        # Smart CFX (ch6, note 0x00) -> BROWSE\n"
+    "        if n == 0x00:\n"
+    "            if down:\n"
+    "                press(K['browse'], 0, True)\n"
+    "                time.sleep(0.02)\n"
+    "                press(K['browse'], 0, False)\n"
+    "            return\n"
+    "\n"
+    "        if ctl_id == 'xdjr1':\n"
+    "            if n in (0x54, 0x55):"
+)
+
+count = s.count(anchor)
+if count != 1:
+    print(f"    MISS — anchor matched {count} time(s), expected 1")
+    print("           grep -n 'elif ch == 6' controller-bridge.py")
+    sys.exit(0)
+
+s = s.replace(anchor, replacement, 1)
+p.write_text(s)
+print("    applied (Smart Fader -> SOURCE, Smart CFX -> BROWSE)")
+PYEOF
+
 # --- 5. rx3.conf ------------------------------------------------------------
 say "Writing rx3.conf"
 cat > "$H/rx3.conf" <<EOF
@@ -172,6 +232,7 @@ echo "  Presenter: $HOME/rx3-fb-present"
 echo "  Touch:     $HOME/rx3-touch-bridge"
 echo "  Config:    $H/rx3.conf"
 echo "  Service:   rx3.service (enabled)"
+echo "  Smart FX:  Smart Fader -> SOURCE, Smart CFX -> BROWSE"
 echo
 
 if [ "$AUTO_REBOOT" = "1" ]; then
