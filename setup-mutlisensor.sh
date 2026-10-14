@@ -1,14 +1,21 @@
 #!/bin/bash
-# setup-rx3-auto.sh — automatic XDJ-RX3 install on Raspberry Pi 4 + 7" DSI + DDJ-FLX4
-# Based on mutlisensor/Rx3-flx4 (main branch)
-# Chains all 6 manual steps into one command
+# setup-rx3-auto.sh — automatic XDJ-RX3 install on Raspberry Pi 4
+#                    + ORIGINAL official 7" DSI panel (800×480)
+#                    + DDJ-FLX4
+#
+# Based on mutlisensor/Rx3-flx4 (main branch) — INSTALL.md steps 1–6,
+# chained into one command with Pi 4 and original-DSI adaptations.
 #
 # Run as normal user (NOT root):
 #   bash setup-rx3-auto.sh 2>&1 | tee ~/rx3-install.log
+#
+# Options:
+#   AUTO_REBOOT=0  skip the reboot at the end
 set -euo pipefail
 
 W="$HOME/Rx3-flx4"
 H="$W/rx3-handoff"
+R="$HOME/rx3-rootfs"
 AUTO_REBOOT="${AUTO_REBOOT:-1}"
 REBOOT_DELAY=10
 
@@ -24,15 +31,17 @@ MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
 echo "  Model: $MODEL"
 case "$MODEL" in
   *"Raspberry Pi 4"*) echo "  Pi 4 detected" ;;
-  *"Raspberry Pi 5"*) warn "Pi 5 — upstream target; Pi 4 adaptations may not apply" ;;
+  *"Raspberry Pi 5"*) warn "Pi 5 — upstream target; Pi 4 adaptations may conflict" ;;
   *) warn "Unknown model" ;;
 esac
 
 say "Requesting sudo"
 sudo -v || die "sudo failed"
 
-# --- 1. Packages --------------------------------------------------------------
-say "Installing packages (step 1 of 6)"
+# =============================================================================
+# STEP 1 — Packages
+# =============================================================================
+say "STEP 1/6 — Installing packages"
 sudo apt update
 sudo apt install -y \
   git build-essential gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
@@ -41,49 +50,78 @@ sudo apt install -y \
   python3 python3-pil python3-cryptography \
   rsync p7zip-full unzip curl evtest file
 
-# --- 2. DSI overlay + cmdline (Pi 4 adaptation) -------------------------------
-say "Applying Pi 4 display + USB adaptations"
+# =============================================================================
+# STEP 2 — Pi 4 + ORIGINAL 7" DSI adaptations
+# =============================================================================
+say "STEP 2/6 — Applying Pi 4 + original-DSI adaptations"
+
 CONFIG=/boot/firmware/config.txt
 [ -f "$CONFIG" ] || CONFIG=/boot/config.txt
 CMDLINE=/boot/firmware/cmdline.txt
 [ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
+[ -f "$CONFIG" ] || die "config.txt not found"
+[ -f "$CMDLINE" ] || die "cmdline.txt not found"
+
+# --- DSI overlay: ORIGINAL 7" panel (800×480), NOT Touch Display 2 -----------
+# Remove any Touch Display 2 overlay that a previous run might have added
+if grep -q "vc4-kms-dsi-ili9881-7inch" "$CONFIG"; then
+  echo "  Removing Touch Display 2 overlay (wrong panel for this hardware)"
+  sudo sed -i '/vc4-kms-dsi-ili9881-7inch/d' "$CONFIG"
+fi
 
 if ! grep -q "vc4-kms-dsi-7inch" "$CONFIG"; then
   sudo cp "$CONFIG" "$CONFIG.bak.$(date +%s)"
-  echo "dtoverlay=vc4-kms-dsi-7inch" | sudo tee -a "$CONFIG" >/dev/null
-  echo "  DSI overlay added"
+  {
+    echo ""
+    echo "# Added by setup-rx3-auto.sh — ORIGINAL official 7\" DSI panel"
+    echo "dtoverlay=vc4-kms-dsi-7inch"
+  } | sudo tee -a "$CONFIG" >/dev/null
+  echo "  DSI overlay: vc4-kms-dsi-7inch (original panel) added"
 else
-  echo "  DSI overlay already present"
+  echo "  DSI overlay: vc4-kms-dsi-7inch already present"
 fi
 
+# --- USB quirks + console -----------------------------------------------------
 if ! grep -q "usb-storage.quirks=174c:2362:u" "$CMDLINE"; then
   sudo cp "$CMDLINE" "$CMDLINE.bak.$(date +%s)"
   sudo sed -i 's|$| usb-storage.quirks=174c:2362:u vt.global_cursor_default=0 consoleblank=0|' "$CMDLINE"
-  echo "  USB quirks added"
+  echo "  USB quirks + console settings added"
 else
   echo "  USB quirks already present"
 fi
 
-# --- 3. Clone ------------------------------------------------------------------
-say "Cloning mutlisensor/Rx3-flx4"
+# --- Touch driver: blacklist edt_ft5x06 (conflicts with DSI panel) -----------
+if [ ! -f /etc/modprobe.d/blacklist-edt-ft5x06.conf ]; then
+  echo "blacklist edt_ft5x06" | sudo tee /etc/modprobe.d/blacklist-edt-ft5x06.conf >/dev/null
+  sudo update-initramfs -u || true
+  echo "  Touch driver edt_ft5x06 blacklisted"
+else
+  echo "  Touch driver blacklist already present"
+fi
+
+# =============================================================================
+# STEP 3 — Clone source tree
+# =============================================================================
+say "STEP 3/6 — Cloning mutlisensor/Rx3-flx4"
 if [ -d "$W/.git" ]; then
-  cd "$W" && git fetch origin
+  echo "  Repo already present at $W"
+  cd "$W"
+  git fetch origin
 else
   git clone https://github.com/mutlisensor/Rx3-flx4.git "$W"
   cd "$W"
 fi
 git checkout main
-git pull origin main || warn "pull failed (offline?)"
-echo "  commit: $(git rev-parse --short HEAD)"
+git pull origin main || warn "git pull failed (offline?) — continuing with local copy"
+echo "  Branch: $(git branch --show-current)"
+echo "  Commit: $(git rev-parse --short HEAD)"
 
 cd "$H"
 chmod +x *.sh
 
-# --- 4. Doctor check -----------------------------------------------------------
-say "Running doctor check (step 3 of 6)"
-./install.sh doctor || warn "doctor reported issues — continuing anyway"
-
-# --- 5. Pi 4 adaptation: rx3-start.sh -----------------------------------------
+# =============================================================================
+# STEP 4 — Pi 4 adaptation of rx3-start.sh
+# =============================================================================
 say "Adapting rx3-start.sh for Pi 4"
 if [ -f "$H/rx3-start.sh" ]; then
   python3 - <<'PYEOF'
@@ -91,56 +129,91 @@ from pathlib import Path
 p = Path.home() / "Rx3-flx4/rx3-handoff/rx3-start.sh"
 s = p.read_text()
 changed = []
+
+# 1. Disable Pi 5 USB VBUS power-cycle (RP1 chip doesn't exist on Pi 4)
 old = "if { [ $wait = 10 ] || [ $wait = 22 ]; }"
 new = "if false && { [ $wait = 10 ] || [ $wait = 22 ]; }"
 if old in s:
-    s = s.replace(old, new, 1); changed.append("USB power-cycle disabled")
+    s = s.replace(old, new, 1)
+    changed.append("USB power-cycle disabled")
+
+# 2. Unblank framebuffer at startup
 anchor = "[ -w /sys/class/graphics/fbcon/cursor_blink ] && echo 0 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null"
 add = anchor + "\n[ -w /sys/class/graphics/fb0/blank ] && echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null"
 if "fb0/blank" not in s and anchor in s:
-    s = s.replace(anchor, add, 1); changed.append("fb0 unblank")
+    s = s.replace(anchor, add, 1)
+    changed.append("fb0 unblank")
+
 p.write_text(s)
-print(f"  changes: {', '.join(changed) if changed else 'none needed'}")
+print(f"  Changes: {', '.join(changed) if changed else 'none needed (already adapted)'}")
 PYEOF
+else
+  warn "rx3-start.sh not found — check repo layout"
 fi
 
-# --- 6. Recover firmware -------------------------------------------------------
-say "Recovering firmware (step 2 of 6) — this downloads ~110 MB"
+# =============================================================================
+# STEP 5 — Firmware recovery + chroot build (INSTALL.md step 2 + step 4)
+# =============================================================================
+say "STEP 5/6 — Firmware + chroot"
+
+# --- Doctor check -------------------------------------------------------------
+say "  Doctor check"
+cd "$H"
+./install.sh doctor || warn "  doctor reported issues — continuing"
+
+# --- Firmware recovery --------------------------------------------------------
 if [ -d "$H/extracted/runtime-files" ] && [ -f "$H/runtime-symlinks.json" ]; then
-  echo "  firmware already extracted"
+  echo "  Firmware already extracted"
 else
+  echo "  Recovering firmware (~110 MB download from Pioneer)"
   cd "$H"
   python3 recover-firmware.py || die "recover-firmware.py failed"
   python3 extract_cramfs.py | tee /tmp/extract.log
-  grep -q "Extraction complete." /tmp/extract.log || die "extraction incomplete — run extract_cramfs.py again"
-  echo "  firmware extracted"
+  grep -q "Extraction complete." /tmp/extract.log || die "extraction incomplete"
+  echo "  Firmware extracted"
 fi
 
-# --- 7. Build chroot -----------------------------------------------------------
-say "Building chroot (step 4 of 6) — expect ~6.5 GB, ~1 minute"
-if [ -f "$HOME/rx3-rootfs/root/pdj/rbp-pi" ]; then
-  echo "  chroot already built"
+# --- Chroot build -------------------------------------------------------------
+if [ -f "$R/root/pdj/rbp-pi" ]; then
+  echo "  Chroot already built at $R"
 else
+  echo "  Building ARM32 chroot (~6.5 GB, takes ~1 minute)"
   cd "$H"
   ./build-rootfs.sh || die "build-rootfs.sh failed"
 fi
 
-# --- 8. Install host side ------------------------------------------------------
-say "Installing host side (step 5 of 6)"
+# =============================================================================
+# STEP 6 — Host install + service enable (INSTALL.md step 5 + step 6)
+# =============================================================================
+say "STEP 6/6 — Host install + service"
+
 cd "$H"
 ./install.sh || die "install.sh failed"
 
-# --- 9. Enable service ---------------------------------------------------------
-say "Enabling service (step 6 of 6)"
 sudo systemctl enable rx3
 sudo systemctl restart rx3
 
-# --- 10. Verify ----------------------------------------------------------------
+# =============================================================================
+# Verify
+# =============================================================================
 say "Verifying"
 sleep 5
-systemctl is-active --quiet rx3 && echo "  rx3: active" || echo "  rx3: NOT active"
-[ -f "$HOME/rx3-rootfs/dev/rx3-ctl" ] && cat "$HOME/rx3-rootfs/dev/rx3-ctl" | sed 's/^/  audio: /' || true
 
+systemctl is-active --quiet rx3 && echo "  rx3.service: active" || echo "  rx3.service: NOT active"
+
+if [ -f "$R/dev/rx3-ctl" ]; then
+  cat "$R/dev/rx3-ctl" | sed 's/^/  audio card: /'
+fi
+
+if [ -f "$R/tmp/rx3-leds" ]; then
+  echo "  /tmp/rx3-leds: present ($(stat -c%s "$R/tmp/rx3-leds") bytes)"
+else
+  echo "  /tmp/rx3-leds: not yet created (shim will create it once firmware runs)"
+fi
+
+# =============================================================================
+# Reboot
+# =============================================================================
 if [ "$AUTO_REBOOT" = "1" ]; then
   say "Rebooting in $REBOOT_DELAY seconds (Ctrl+C to cancel)"
   sleep "$REBOOT_DELAY"
